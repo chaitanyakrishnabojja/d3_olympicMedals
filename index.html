@@ -1,0 +1,470 @@
+<!doctype html>
+<html>
+
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/4.2.8/d3.min.js" type="text/JavaScript"></script>
+    <script src="https://d3js.org/d3-geo-projection.v1.min.js"></script>
+    <script src="colorbrewer.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-legend/2.21.0/d3-legend.min.js"></script>
+    <style>
+        path.countries {
+            stroke-width: 1;
+            stroke: #75739F;
+            fill: #5EAFC6;
+        }
+
+        path.graticule {
+            fill: none;
+            stroke-width: 1;
+            stroke: #9A8B7A;
+        }
+
+        path.graticule.outline {
+            stroke: #9A8B7A;
+        }
+
+        path.merged {
+            fill: #9A8B7A;
+            stroke: #4F442B;
+            stroke-width: 2px;
+        }
+
+    </style>
+</head>
+
+<body>
+    <div id="controls">
+        <input type="button" value="TotalMedals" onclick="totals()"><br/>
+        <input type="button" value="Golds" onclick="golds()">
+        <input type="button" value="Silvers" onclick="silvers()">
+        <input type="button" value="Bronzes" onclick="bronzes()"><br/>
+        <text class="bottomText" style=""></text>
+    </div>
+
+    <div id="viz">
+ 
+        <svg style="width:700px;height:700px;"></svg>
+        <svg class="svg2" style="width:500px;height:700px;"></svg>
+
+
+    </div>
+    <script>
+        var countries = [];
+        var medalsCount = [];
+        var medalians = [];
+
+        var PromiseWrapper = (xhr, d) => new Promise(resolve => xhr(d, (p) => resolve(p)));
+
+        Promise
+            .all([
+                PromiseWrapper(d3.json, "world.geojson"),
+                PromiseWrapper(d3.csv, "MedalsCount.csv"),
+                PromiseWrapper(d3.csv, "MedalsList.csv")
+            ])
+            .then(resolve => {
+                countries = resolve[0];
+                medalsCount = resolve[1];
+                medalians = resolve[2];
+                createMap(resolve[0], resolve[1], resolve[2]);
+            });
+
+
+        function createMap(countries, medalsCount, medalians) {
+
+            console.log("countries", countries);
+            console.log("medalsCount", medalsCount);
+            console.log("medalians", medalians);
+
+            var projection = d3.geoOrthographic()
+                .scale(200)
+                .translate([300, 300])
+                .center([0, 0]);
+
+            var geoPath = d3.geoPath().projection(projection);
+            var featureData = countries.features;
+
+            var realFeatureSize = d3.extent(featureData, d => d3.geoArea(d));
+
+            var newFeatureColor = d3.scaleQuantize()
+                .domain(realFeatureSize)
+                .range(colorbrewer.Reds[7]);
+
+            d3.select("svg").selectAll("path").data(countries.features)
+                .enter()
+                .append("path")
+                .attr("d", geoPath)
+                .attr("class", "countries")
+                .style("fill", d => newFeatureColor(d3.geoArea(d)))
+                .style("stroke", d => d3.rgb(newFeatureColor(d3.geoArea(d))).darker());
+
+            //            d3.select("svg").selectAll("circle").data(cities)
+            //                .enter()
+            //                .append("circle")
+            //                .attr("class", "cities")
+            //                .attr("r", 3)
+            //                .attr("cx", d => projection([d.x, d.y])[0])
+            //                .attr("cy", d => projection([d.x, d.y])[1]);
+
+            var graticule = d3.geoGraticule();
+
+            d3.select("svg").insert("path", "path.countries")
+                .datum(graticule)
+                .attr("class", "graticule line")
+                .attr("d", geoPath);
+
+            d3.select("svg").insert("path", "path.countries")
+                .datum(graticule.outline)
+                .attr("class", "graticule outline")
+                .attr("d", geoPath);
+
+            var zoomSettings = d3.zoomIdentity
+                .translate(0, 0)
+                .scale(200);
+
+            var rotateScale = d3.scaleLinear()
+                .domain([-500, 0, 500])
+                .range([-180, 0, 180]);
+
+            var mapZoom = d3.zoom()
+                .on("zoom", zoomed);
+
+            var zoomSettings = d3.zoomIdentity
+                .translate(250, 250)
+                .scale(120);
+
+            d3.select("svg")
+                .call(mapZoom)
+                .call(mapZoom.transform, zoomSettings);
+
+            function zoomed() {
+                var e = d3.event;
+                var currentRotate = rotateScale(e.transform.x) % 360;
+
+                projection
+                    .rotate([currentRotate, 0])
+                    .scale(e.transform.k);
+
+                d3.selectAll("path.graticule").attr("d", geoPath);
+                d3.selectAll("path.countries").attr("d", geoPath);
+
+            }
+
+            d3.selectAll("path.countries")
+                .on("click", showBarGraph);
+
+            function showBarGraph(d) {
+                console.log("showBarGraph");
+                d3.selectAll("path.countries")
+                    .style("fill", "black");
+                d3.select(this)
+                    .style("fill", "red");
+
+                var clickedCountry = medalsCount.filter(function(obj) {
+
+                    if ((obj.NOC_CODE == d.id) || (obj.Country == d.properties.name)) {
+                        return (obj.NOC_CODE = d.id) || (obj.Country = d.properties.name);
+                    }
+
+                });
+
+                console.log("clickedCountry", clickedCountry);
+
+                if (clickedCountry.length == 0) {
+
+                    d3.select("svg.svg2").selectAll("rect").remove();
+                    console.log("d", d);
+                    d3.select("text.bottomText").text(d.properties.name + " has no medals");
+                    d3.select("svg").selectAll("g").remove();
+
+
+                } else {
+
+
+
+                    var totalForSelectedCountry = parseInt(clickedCountry[0].Total);
+                    var goldsForSelectedCountry = parseInt(clickedCountry[0].Golds);
+                    var silversForSelectedCountry = parseInt(clickedCountry[0].Silvers);
+                    var bronzesForSelectedCountry = parseInt(clickedCountry[0].Bronzes);
+
+                    console.log("totalForSelectedCountry", totalForSelectedCountry);
+                    console.log("goldsForSelectedCountry", goldsForSelectedCountry);
+                    console.log("silversForSelectedCountry", silversForSelectedCountry);
+                    console.log("bronzesForSelectedCountry", bronzesForSelectedCountry);
+
+                    var yScale = d3.scaleLinear().domain([0, parseInt(clickedCountry[0].Total)]).range([0, 500]).clamp(true);
+
+                    //                    ------------------------------------------
+                    
+                    d3.selectAll("svg.svg2").selectAll("g").remove();
+
+                    var xScale = d3.scaleOrdinal().domain(['', 'Total', 'Gold', 'Silver', 'Bronze', '']).range([0, 85, 140, 195, 250, 375]);
+                    var yScale1 = d3.scaleLinear().domain([0, parseInt(clickedCountry[0].Total)]).range([500, 0]).clamp(true);
+
+
+                    var xAxis = d3.axisBottom()
+                        .scale(xScale);
+
+                    d3.selectAll("svg.svg2").append("g")
+                        .attr("transform", `translate(50,500)`)
+                        .attr("id", "xAxisG")
+                        .call(xAxis);
+
+
+                    var yAxis = d3.axisLeft()
+                        .scale(yScale1)
+                        .ticks(15);
+
+                    d3.selectAll("svg.svg2").append("g")
+                        .attr("transform", `translate(50,0)`)
+                        .attr("id", "yAxisG")
+                        .call(yAxis);
+
+
+                    //"Total", "Gold", "Silver", "Bronze"
+
+                    //                    --------------------------------------------
+
+
+                    d3.select("svg.svg2").selectAll("rect").remove();
+                    d3.select("svg.svg2").selectAll("rect")
+                        .data([totalForSelectedCountry, goldsForSelectedCountry, silversForSelectedCountry, bronzesForSelectedCountry])
+                        .enter()
+                        .append("rect")
+                        .attr("width", 50)
+                        .attr("height", d => yScale(d))
+                        .attr("x", (d, i) => (i + 2) * 55)
+                        .attr("y", d => 500 - yScale(d))
+                        .style("fill", (d, i) => {
+                            return (i == 0) ? "green" : ((i == 1) ? "#F5933D" : ((i == 2) ? "#9C9895" : "#BA39C1"))
+                        })
+                        .on("mouseover", function(d){console.log("d", d);
+                        d3.select(this).append("title").text(d => d);
+                    });
+                    d3.select("text.bottomText").text(clickedCountry[0].Country);
+                    d3.select("svg").selectAll("g").remove();
+                    
+              
+
+                }
+
+
+            }
+            
+
+        }
+
+
+        function totals() {
+            console.log("reached totals fun");
+
+
+
+
+            var totalSize = d3.extent(medalsCount, d => parseInt(d.Total));
+            var minSize = d3.min(medalsCount, d => parseInt(d.Total));
+            var maxSize = d3.max(medalsCount, d => parseInt(d.Total));
+            //            var sizeArray = [];
+            //            medalsCount.forEach(function(p){
+            //                var ind = sizeArray.indexOf(parseInt(p.Total));
+            //                if(ind == -1){
+            //                    sizeArray.push(parseInt(p.Total));
+            //                }
+            //            });
+            //            console.log("sizeArray", sizeArray);
+            console.log("totalSize", totalSize);
+            var newTotalColor = d3.scaleQuantile()
+                .domain([0, 100, 500, 2000])
+                .range(["red", "blue", "yellow", "green"]);
+
+            d3.select("svg").selectAll("g").remove();
+
+            var legendA = d3.legendColor().scale(newTotalColor)
+            d3.select("svg")
+                .style("width", "700px");
+            d3.select("svg")
+                .append("g")
+                .attr("transform", "translate(500, 0)")
+                .call(legendA);
+
+            d3.select("svg").selectAll("path.countries")
+                .style("fill", "yellow")
+                .style("fill", d => {
+                    var colour = "black";
+                    medalsCount.forEach(function(p) {
+                        if ((d.id == p.NOC_CODE) || (d.properties.name == p.Country)) {
+                            console.log("d.properties.name", d.properties.name);
+                            console.log("p.Country", p.Country);
+                            console.log("d.id", d.id);
+                            console.log("p.NOC_CODE", p.NOC_CODE);
+                            console.log("parseInt(p.Total)", parseInt(p.Total));
+                            console.log("newTotalColor(parseInt(p.Total))", newTotalColor(parseInt(p.Total)));
+                            colour = newTotalColor(parseInt(p.Total));
+                        }
+                    });
+                    return colour;
+                    //                console.log("parseInt(d.Total)", d); return "red";
+                });
+            //          newTotalColor(parseInt(d.Total))
+            d3.select("text.bottomText").text("Total Medals");
+        }
+
+
+        function golds() {
+            console.log("reached golds fun");
+            var totalSize = d3.extent(medalsCount, d => parseInt(d.Golds));
+            var minSize = d3.min(medalsCount, d => parseInt(d.Golds));
+            var maxSize = d3.max(medalsCount, d => parseInt(d.Golds));
+            //            var sizeArray = [];
+            //            medalsCount.forEach(function(p){
+            //                var ind = sizeArray.indexOf(parseInt(p.Total));
+            //                if(ind == -1){
+            //                    sizeArray.push(parseInt(p.Total));
+            //                }
+            //            });
+            //            console.log("sizeArray", sizeArray);
+            console.log("totalSize", totalSize);
+            var newTotalColor = d3.scaleQuantile()
+                .domain([0, 100, 500, 1000])
+                .range(["red", "blue", "yellow", "green"]);
+
+            d3.select("svg").selectAll("g").remove();
+
+            var legendA = d3.legendColor().scale(newTotalColor)
+            d3.select("svg")
+                .style("width", "700px");
+            d3.select("svg")
+                .append("g")
+                .attr("transform", "translate(500, 0)")
+                .call(legendA);
+
+            d3.select("svg").selectAll("path.countries")
+                .style("fill", "yellow")
+                .style("fill", d => {
+                    var colour = "black";
+                    medalsCount.forEach(function(p) {
+                        if ((d.id == p.NOC_CODE) || (d.properties.name == p.Country)) {
+                            console.log("d.properties.name", d.properties.name);
+                            console.log("p.Country", p.Country);
+                            console.log("d.id", d.id);
+                            console.log("p.NOC_CODE", p.NOC_CODE);
+                            console.log("parseInt(p.Total)", parseInt(p.Golds));
+                            console.log("newTotalColor(parseInt(p.Total))", newTotalColor(parseInt(p.Golds)));
+                            colour = newTotalColor(parseInt(p.Golds));
+                        }
+                    });
+                    return colour;
+                    //                console.log("parseInt(d.Total)", d); return "red";
+                });
+            //          newTotalColor(parseInt(d.Total))
+            d3.select("text.bottomText").text("Gold Medal Winners");
+        }
+
+        function silvers() {
+            console.log("reached silvers fun");
+            var totalSize = d3.extent(medalsCount, d => parseInt(d.Silvers));
+            var minSize = d3.min(medalsCount, d => parseInt(d.Silvers));
+            var maxSize = d3.max(medalsCount, d => parseInt(d.Silvers));
+            //            var sizeArray = [];
+            //            medalsCount.forEach(function(p){
+            //                var ind = sizeArray.indexOf(parseInt(p.Total));
+            //                if(ind == -1){
+            //                    sizeArray.push(parseInt(p.Total));
+            //                }
+            //            });
+            //            console.log("sizeArray", sizeArray);
+            console.log("totalSize", totalSize);
+            var newTotalColor = d3.scaleQuantile()
+                .domain([0, 100, 500, 800])
+                .range(["red", "blue", "yellow", "green"]);
+
+            d3.select("svg").selectAll("g").remove();
+
+            var legendA = d3.legendColor().scale(newTotalColor)
+            d3.select("svg")
+                .style("width", "700px");
+            d3.select("svg")
+                .append("g")
+                .attr("transform", "translate(500, 0)")
+                .call(legendA);
+
+            d3.select("svg").selectAll("path.countries")
+                .style("fill", "yellow")
+                .style("fill", d => {
+                    var colour = "black";
+                    medalsCount.forEach(function(p) {
+                        if ((d.id == p.NOC_CODE) || (d.properties.name == p.Country)) {
+                            console.log("d.properties.name", d.properties.name);
+                            console.log("p.Country", p.Country);
+                            console.log("d.id", d.id);
+                            console.log("p.NOC_CODE", p.NOC_CODE);
+                            console.log("parseInt(p.Total)", parseInt(p.Silvers));
+                            console.log("newTotalColor(parseInt(p.Total))", newTotalColor(parseInt(p.Silvers)));
+                            colour = newTotalColor(parseInt(p.Silvers));
+                        }
+                    });
+                    return colour;
+                    //                console.log("parseInt(d.Total)", d); return "red";
+                });
+            //          newTotalColor(parseInt(d.Total))
+            d3.select("text.bottomText").text("Silver Medal Winners");
+        }
+
+
+
+
+        function bronzes() {
+            console.log("reached bronzes fun");
+
+            var totalSize = d3.extent(medalsCount, d => parseInt(d.Bronzes));
+            var minSize = d3.min(medalsCount, d => parseInt(d.Bronzes));
+            var maxSize = d3.max(medalsCount, d => parseInt(d.Bronzes));
+            //            var sizeArray = [];
+            //            medalsCount.forEach(function(p){
+            //                var ind = sizeArray.indexOf(parseInt(p.Total));
+            //                if(ind == -1){
+            //                    sizeArray.push(parseInt(p.Total));
+            //                }
+            //            });
+            //            console.log("sizeArray", sizeArray);
+            console.log("totalSize", totalSize);
+            var newTotalColor = d3.scaleQuantile()
+                .domain([0, 100, 500, 800])
+                .range(["red", "blue", "yellow", "green"]);
+
+            d3.select("svg").selectAll("g").remove();
+
+            var legendA = d3.legendColor().scale(newTotalColor)
+            d3.select("svg")
+                .style("width", "700px");
+            d3.select("svg")
+                .append("g")
+                .attr("transform", "translate(500, 0)")
+                .call(legendA);
+
+            d3.select("svg").selectAll("path.countries")
+                .style("fill", "yellow")
+                .style("fill", d => {
+                    var colour = "black";
+                    medalsCount.forEach(function(p) {
+                        if ((d.id == p.NOC_CODE) || (d.properties.name == p.Country)) {
+                            console.log("d.properties.name", d.properties.name);
+                            console.log("p.Country", p.Country);
+                            console.log("d.id", d.id);
+                            console.log("p.NOC_CODE", p.NOC_CODE);
+                            console.log("parseInt(p.Total)", parseInt(p.Bronzes));
+                            console.log("newTotalColor(parseInt(p.Total))", newTotalColor(parseInt(p.Bronzes)));
+                            colour = newTotalColor(parseInt(p.Bronzes));
+                        }
+                    });
+                    return colour;
+                    //                console.log("parseInt(d.Total)", d); return "red";
+                });
+            //          newTotalColor(parseInt(d.Total))
+            d3.select("text.bottomText").text("Bronze Medal Winners");
+
+        }
+
+    </script>
+</body>
+
+</html>
